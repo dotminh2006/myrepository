@@ -1,146 +1,108 @@
-markdown_content = """# Spatial Audio Compression for Immersive Playback
+Compressing Spatial Audio for Immersive Playback
 
-## Project Overview
-This project implements a complete pipeline for analyzing, compressing, and subjectively evaluating spatial audio (Ambisonics). Using Python and Principal Component Analysis (PCA), the system identifies spatial redundancy in high-order ambisonic soundfields (e.g., 3rd-order, 16 channels), compresses the data footprint, and reconstructs it. The reconstructed audio is then evaluated against the original uncompressed audio using a binaural rendering engine in the REAPER Digital Audio Workstation (DAW).
+This project implements a pipeline to compress First-Order Ambisonics (FOA) audio using Principal Component Analysis (PCA). The goal is to analyze spatial redundancy, compress the 4-channel B-format signal, and evaluate the reconstructed audio through both mathematical error analysis and subjective visual cues (Goniometer/Lissajous figures).
 
----
+Prerequisites
+- Environment: Google Colab
+- Libraries: `librosa`, `scikit-learn`, `numpy`, `matplotlib`, `ipywidgets`
 
-## 1. System Prerequisites
+Project Workflow
 
-### Operating System
-* **Windows 10/11 (Highly Recommended):** Native support for VST3 plugins and pre-compiled Python audio wheels.
-* **Ubuntu 22.04 (Alternative):** Requires manual VST directory management and specific Linux VST packages (IEM Plugin Suite is recommended over SPARTA for compatibility).
-
-### Required Software
-1.  **Python 3.8+** (with `pip` and `venv`)
-2.  **REAPER DAW:** [Download REAPER](https://www.reaper.fm/download.php)
-3.  **IEM Plugin Suite:** [Download IEM Suite](https://plugins.iem.at/) (Contains the critical `BinauralDecoder` VST3 plugin).
-
----
-
-## 2. REAPER Setup & Configuration
-
-### A. Installing the Spatial Plugins (IEM Suite)
-The IEM Binaural Decoder is required to translate the multi-channel mathematics of Ambisonics into a 3D acoustic space you can hear over standard stereo headphones.
-* **Windows:** Run the IEM installer `.exe` and ensure the **VST3** option is checked. It will install to `C:\\Program Files\\Common Files\\VST3`.
-* **Linux:** Extract the downloaded archive and copy the `.vst3` folders (specifically `BinauralDecoder.vst3`) into `~/.vst3`.
-
-### B. Configuring the Audio Backend
-1. Open REAPER and press `Ctrl + P` to open Preferences.
-2. Navigate to **Audio -> Device**.
-3. **Windows:** Set the Audio system to **WASAPI** (Shared or Exclusive mode). If using an external audio interface, select **ASIO**.
-4. **Linux:** Select **ALSA** or **JACK/PipeWire** depending on your distribution's audio server.
-
-### C. Scanning the Plugins
-1. In Preferences, go to **Plug-ins -> VST**.
-2. Click **Re-scan -> Scan for new/modified plug-ins**. Ensure REAPER detects "IEM: BinauralDecoder".
-
----
-
-## 3. Creating the Evaluation Template
-
-To compare the compressed audio against the original, you must set up a multi-channel project template.
-
-1.  **Create Tracks:** Create Track 1 (Name: "Original") and Track 2 (Name: "Reconstructed").
-2.  **Configure Track Channels:**
-    * Click the **Route** button on Track 1.
-    * Change **Track channels** to **16** (for 3rd-Order Ambisonics) or **4** (for 1st-Order).
-    * Repeat this exact step for Track 2.
-3.  **Configure the Master Track:**
-    * Go to **View -> Master Track** to make it visible.
-    * Click **Route** on the Master Track and change its channels to **16** (or 4).
-    * Click the **FX** button on the Master Track.
-    * Add **VST3: BinauralDecoder (IEM)**.
-4.  **Configure the Decoder:**
-    * In the plugin window, set **Input Order** to match your project (e.g., 3rd).
-    * Select your headphone EQ profile if desired.
-
-*Tip: Save this empty project as a REAPER Template (`File > Project templates > Save project as template...`) for easy access.*
-
----
-
-## 4. Python Environment Setup
-
-The Python pipeline handles the matrix math required to identify spatial redundancy and perform the compression.
-
-1.  **Create a Virtual Environment:** Open your terminal/command prompt in your project folder.
-    ```
-```text?code_stdout&code_event_index=2
-File saved successfully with tag: /mnt/data/Spatial_Audio_Compression_README.md
-
-```bash
-    # Windows
-    python -m venv spatial_audio_env
-    spatial_audio_env\\Scripts\\activate
-
-    # Linux/Mac
-    python3 -m venv spatial_audio_env
-    source spatial_audio_env/bin/activate
-    ```
-2.  **Install Dependencies:**
-    ```bash
-    pip install numpy scipy soundfile
-    ```
-    *(Optional: Install `librosa`, `matplotlib`, and `spaudiopy` for advanced plotting and feature extraction).*
-
----
-
-## 5. Running the Python Compression Pipeline
-
-Save the following code as `spatial_compressor.py` in your project folder.
-
+Step 1: Install Dependencies
+Run this cell once at the start of your notebook to ensure all required libraries are installed.
 ```python
+!pip install librosa soundfile scikit-learn
+
+Step 2: Generate a Test File (Optional)
+If you do not have a 4-channel B-Format .wav file, run this cell to generate a "spinning" test tone. This allows you to verify the pipeline works before testing real-world audio.
 import numpy as np
 import soundfile as sf
-import os
 
-def process_spatial_audio(input_file, output_file, target_channels):
-    print(f"--- Spatial Audio Compression pipeline ---")
-    print(f"Loading '{input_file}'...")
+# Set up time and sample rate
+sr = 48000
+duration = 5.0 
+t = np.linspace(0, duration, int(sr * duration))
+
+# Create a source signal and a rotating movement pattern
+source = np.sin(2 * np.pi * 440 * t) 
+theta = np.linspace(0, 2 * np.pi, len(t))
+
+# Encode into FOA (B-Format)
+W = source * 0.707
+X = source * np.cos(theta)
+Y = source * np.sin(theta)
+Z = np.zeros_like(t) 
+
+# Save as 4-channel file
+foa_audio = np.vstack((W, X, Y, Z))
+sf.write('spinning_test_tone.wav', foa_audio.T, sr)
+print("Created 'spinning_test_tone.wav' successfully!")
+
+Step 3: The Master Processing Pipeline
+This cell handles everything: file upload, PCA compression, reconstruction, and the evaluation dashboard.
+Important: This script enforces a strict 4-channel check. Ensure your input file is a true FOA B-Format .wav file.
+from google.colab import files
+import librosa
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+import IPython.display as ipd
+import ipywidgets as widgets
+
+# Upload file
+print("Please upload your 4-channel FOA .wav file:")
+uploaded = files.upload() 
+
+if uploaded:
+    filename = list(uploaded.keys())[0]
     
-    try:
-        data, samplerate = sf.read(input_file)
-    except Exception as e:
-        print(f"Error loading file: {e}")
-        return
+    # Load audio
+    y_original, sr = librosa.load(filename, sr=None, mono=False, duration=30.0)
 
-    original_channels = data.shape[1]
-    print(f"Original spatial resolution: {original_channels} channels at {samplerate}Hz")
-    
-    # REDUNDANCY ANALYSIS (PCA)
-    print("Analyzing spatial redundancy...")
-    channel_means = np.mean(data, axis=0)
-    centered_data = data - channel_means
-    cov_matrix = np.cov(centered_data, rowvar=False)
-    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
-    
-    sorted_indices = np.argsort(eigenvalues)[::-1]
-    sorted_eigenvectors = eigenvectors[:, sorted_indices]
-
-    # COMPRESSION
-    print(f"Compressing down to {target_channels} channels...")
-    compression_matrix = sorted_eigenvectors[:, :target_channels]
-    compressed_data = np.dot(centered_data, compression_matrix)
-
-    # RECONSTRUCTION
-    print("Reconstructing soundfield for evaluation...")
-    reconstruction_matrix = compression_matrix.T
-    reconstructed_data = np.dot(compressed_data, reconstruction_matrix) + channel_means
-
-    # EXPORT
-    reconstructed_data = np.clip(reconstructed_data, -1.0, 1.0)
-    sf.write(output_file, reconstructed_data, samplerate)
-    print(f"Saved reconstructed audio to '{output_file}'. Ready for Reaper!")
-
-if __name__ == "__main__":
-    INPUT_WAV = "original_ambisonics.wav"  
-    OUTPUT_WAV = "reconstructed_ambisonics.wav" 
-    COMPRESSED_CHANNELS = 6 
-    
-    # Auto-generate a dummy file for testing if one doesn't exist
-    if not os.path.exists(INPUT_WAV):
-        print(f"'{INPUT_WAV}' not found. Generating a 5-second 16-channel test noise...")
-        dummy_data = np.random.randn(48000 * 5, 16) * 0.1 
-        sf.write(INPUT_WAV, dummy_data, 48000)
+    # Validate channel count
+    if y_original.shape[0] != 4:
+        print(f"❌ Error: Expected 4 channels for FOA, but got {y_original.shape[0]}.")
+    else:
+        # PCA Compression
+        pca = PCA(n_components=2)
+        y_compressed = pca.fit_transform(y_original.T)
+        y_reconstructed = pca.inverse_transform(y_compressed).T
         
-    process_spatial_audio(INPUT_WAV, OUTPUT_WAV, COMPRESSED_CHANNELS)
+        # UI Setup
+        def decode_foa_to_stereo(foa_signal):
+            W, Y = np.squeeze(foa_signal[0]), np.squeeze(foa_signal[2])
+            L, R = (W + Y) * 0.707, (W - Y) * 0.707
+            return np.vstack((L, R))
+
+        audio_orig = ipd.Audio(decode_foa_to_stereo(y_original), rate=sr)
+        audio_recon = ipd.Audio(decode_foa_to_stereo(y_reconstructed), rate=sr)
+        
+        out = widgets.Output()
+        def on_button_clicked(b):
+            with out:
+                out.clear_output()
+                display(audio_orig, audio_recon)
+                
+                # Plotting
+                mid = y_original.shape[1] // 2
+                X_orig, Y_orig = y_original[1, mid-1000:mid+1000], y_original[2, mid-1000:mid+1000]
+                X_rec, Y_rec = y_reconstructed[1, mid-1000:mid+1000], y_reconstructed[2, mid-1000:mid+1000]
+                
+                plt.figure(figsize=(10, 4))
+                plt.subplot(1, 2, 1); plt.scatter(Y_orig, X_orig, s=2); plt.title("Original Spread")
+                plt.subplot(1, 2, 2); plt.scatter(Y_rec, X_rec, s=2, c='red'); plt.title("Reconstructed Spread")
+                plt.show()
+
+        btn = widgets.Button(description="Generate Dashboard", button_style='info')
+        btn.on_click(on_button_clicked)
+        display(btn, out)
+
+***Note: Troubleshooting
+Troubleshooting
+
+    TypeError: Invalid file [...]: This usually happens if the file selection is empty. Ensure you actually selected a file in the "Choose Files" prompt.
+
+    Error: Expected 4 channels...: Your input file is likely standard Stereo or Mono. You must provide a true First-Order Ambisonic file. Use the generator in Step 2 to verify your pipeline is working with known-good data.
+
+    Colab Freezing: If the cell hangs, click the 'Stop' button (square in the circle) and re-run. Ensure you only process the first 30 seconds of large files to avoid memory limits.
+
